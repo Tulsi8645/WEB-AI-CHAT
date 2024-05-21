@@ -3,6 +3,7 @@
 import streamlit as st
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_community.document_loaders import WebBaseLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 def get_response(user_input):
     return "I don't know"
@@ -11,8 +12,13 @@ def get_response(user_input):
 def get_vectorizer_from_url(url):
    # To get the text of webpage in document form
    loader=WebBaseLoader(url)
-   documents=loader.load()
-   return documents
+   document=loader.load()
+
+   #split the document into chunk
+   text_splitter= RecursiveCharacterTextSplitter() #intialzing the text splitter
+   document_chunks=text_splitter.split_documents(document)
+   
+   return document_chunks
 
 
 #app configuration
