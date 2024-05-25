@@ -1,20 +1,20 @@
-# pip install streamlit langchain langchain-openai beautifulsoup4 python-dotenv
+# pip install streamlit langchain langchain-openai beautifulsoup4 python-dotenv chromadb
 
 import streamlit as st
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_community.document_loaders import WebBaseLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import chroma
-from langchain_openai import OpenAIEmbeddings
+from langchain_community.vectorstores import Chroma
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from dotenv import load_dotenv
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain.chains import create_history_aware_retriever, create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
 
 load_dotenv()
 
-def get_response(user_input):
-    return "I don't know"
 
-
-def get_vectorizer_from_url(url):
+def get_vectorstore_from_url(url):
    # To get the text of webpage in document form
    loader=WebBaseLoader(url)
    document=loader.load()
@@ -24,18 +24,53 @@ def get_vectorizer_from_url(url):
    document_chunks=text_splitter.split_documents(document)
    
    #create a vectorstore from the chunks
-   vector_store=chroma.from_documents(document_chunks,OpenAIEmbeddings())
+   vector_store=Chroma.from_documents(document_chunks,OpenAIEmbeddings())
 
    return vector_store
 
 
+def get_context_retriver_chain(vector_store):
+   llm=ChatOpenAI()
+
+   retriever=vector_store.as_retriever()
+
+   prompt=ChatPromptTemplate.from_messages(
+      [
+       MessagesPlaceholder(variable_name="chat_history"),
+       ("user","{input}"),
+       ("user","Given the above conversation, genearte a search query to look up inorder to get information relevant to the conversation")  
+
+      ]    
+   )
+   retriever_chain=create_history_aware_retriever(llm,retriever,prompt)
+   return retriever_chain
+
+def get_conversational_rag_chain(retriever_chain):
+   llm=ChatOpenAI()
+   prompt=ChatPromptTemplate.from_messages([
+      ("system","Answer the user,s questions based on the context below:\n\n{context}"),
+      MessagesPlaceholder(variable_name="chat_history"),
+      ("user","{input}"),
+   ])
+   stuff_documents_chain=create_stuff_documents_chain(llm,stuff_documents_chain)
+   return create_retrieval_chain(retriever_chain,stuff_documents_chain)
+
+def get_response(user_input):
+  #create conversation chain   
+  retriever_chain=get_context_retriver_chain(st.session_state.vector_store)
+  conversation_rag_chain=get_conversational_rag_chain(retriever_chain)
+
+  response= conversation_rag_chain.invoke({
+       "chat_history":st.session_state.chat_history,
+       "input":user_query
+    })
+  return response['answer']
+
+
 #app configuration
-st.set_page_config(page_title="WEB-Ai_CHAT",page_icon="@")
+st.set_page_config(page_title="WEB Chat Bot",page_icon="@")
 st.title("chat with websites")
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history =[
-        AIMessage(content="Hello, I am a bot,How may I help you"),
-    ]
+
 
 #sidebar
 with st.sidebar:
@@ -45,16 +80,31 @@ with st.sidebar:
 if website_url is None or website_url=="":
     st.info("Please enter a URL") 
 
-else: 
-  document_chunks= get_vectorizer_from_url(website_url)
+else:
+  #session state
+  if "chat_history" not in st.session_state:
+    st.session_state.chat_history =[
+        AIMessage(content="Hello, I am a bot,How may I help you"),
+    ]
+  if "vector_store" not in st.session_state:
+     st.session_state.vector_store= get_vectorstore_from_url(website_url)  
  
-        
+       
 #user input
   user_query= st.chat_input("Type your message here...")
   if user_query is not None and user_query !="":
     response= get_response(user_query)
+
     st.session_state.chat_history.append(HumanMessage(content=user_query))
     st.session_state.chat_history.append(AIMessage(content=response))
+
+# To retrieve ranked documents, checking only
+#     retrieved_documents= retriever_chain.invoke({
+#     "chat_history":st.session_state.chat_history,
+#     "input":user_query   
+#     }   
+#     )
+#     st.write(retrieved_documents)
 
 #conversastion
 for message in st.session_state.chat_history:
